@@ -1897,6 +1897,7 @@ int warc_write_resource(warc_writer *w, const char *target_uri, const char *ip,
 void warc_write_backtransaction(httrackp *opt, lien_back *back) {
   warc_writer *w;
   char uri[HTS_URLMAXSIZE * 4 + 16];
+  char fil[HTS_URLMAXSIZE * 2];
   char ip[128];
   const char *body;
   size_t body_len;
@@ -1924,9 +1925,12 @@ void warc_write_backtransaction(httrackp *opt, lien_back *back) {
     return;
 
   is_ftp = strfield(back->url_adr, "ftp://") != 0;
+  /* url_fil is held unescaped; escape it as the request line does, so a space
+     or a raw high byte cannot reach WARC-Target-URI or split the CDXJ key */
+  escape_check_url(back->url_fil, fil, sizeof(fil));
   snprintf(uri, sizeof(uri), "%s%s%s",
            link_has_authority(back->url_adr) ? "" : "http://", back->url_adr,
-           back->url_fil);
+           fil);
 
   ip[0] = '\0';
   SOCaddr_inetntoa(ip, sizeof(ip), back->r.address);

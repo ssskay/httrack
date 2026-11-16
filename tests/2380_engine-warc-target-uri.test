@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# The WARC hook took the URL from the engine's unescaped path, so a space or a
+# raw UTF-8 byte reached WARC-Target-URI and split the CDXJ key line.
+
+set -euo pipefail
+# shellcheck source=tests/testlib.sh
+. "${0%"${0##*/}"}./testlib.sh"
+
+httrack_bin=$(httrack_path)
+
+scratch=$(mktemp -d)
+cleanup_push rm -rf "$scratch"
+
+out=$("$httrack_bin" -O /dev/null -#test=warc-target-uri "$scratch/")
+echo "$out"
+case "$out" in
+*": OK") ;;
+*) exit 1 ;;
+esac

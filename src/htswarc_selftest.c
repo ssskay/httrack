@@ -1385,6 +1385,67 @@ static int st_warc_teardown(httrackp *opt, int argc, char **argv) {
   return st_verdict("warc-teardown", err);
 }
 
+// -#test=warc-target-uri <dir>: the hook names the URL the request line sent,
+// so a space or a raw UTF-8 byte in the path is percent-escaped in
+// WARC-Target-URI and in the CDXJ key, whose fields a space would split.
+static int st_warc_target_uri(httrackp *opt, int argc, char **argv) {
+  static const char want_uri[] =
+      "WARC-Target-URI: http://example.com/a%20b/%e7%94%bb.html\r\n";
+  static const char want_key[] = "com,example)/a%20b/%e7%94%bb.html ";
+  char wpath[HTS_URLMAXSIZE], cpath[HTS_URLMAXSIZE], saved_file[HTS_URLMAXSIZE];
+  void *saved_state;
+  hts_boolean saved_cdx;
+  lien_back *back;
+  unsigned char *blob;
+  size_t len = 0;
+  int err = 0;
+
+  (void) argc;
+  saved_state = opt->state.warc;
+  saved_cdx = opt->warc_cdx;
+  strlcpybuff(saved_file, StringBuff(opt->warc_file), sizeof(saved_file));
+  fconcat(wpath, sizeof(wpath), argv[0], "target-uri.warc");
+  fconcat(cpath, sizeof(cpath), argv[0], "target-uri.cdx");
+  StringCopy(opt->warc_file, wpath);
+  opt->warc_cdx = HTS_TRUE;
+  opt->state.warc = NULL;
+
+  back = calloct(1, sizeof(lien_back));
+  assertf(back != NULL);
+  strcpybuff(back->url_adr, "example.com");
+  strcpybuff(back->url_fil, "/a b/\xe7\x94\xbb.html");
+  back->r.statuscode = 200;
+  strcpybuff(back->r.msg, "OK");
+  strcpybuff(back->r.contenttype, "text/html");
+  back->r.adr = strdupt("body");
+  back->r.size = 4;
+  warc_write_backtransaction(opt, back);
+  freet(back->r.adr);
+  freet(back);
+  warc_close_opt(opt);
+
+  blob = (unsigned char *) st_slurp(wpath, &len);
+  if (blob == NULL || !st_blob_has(blob, len, want_uri)) {
+    fprintf(stderr, "warc-target-uri: %s lacks %s", wpath, want_uri);
+    err = 1;
+  }
+  freet(blob);
+  len = 0;
+  blob = (unsigned char *) st_slurp(cpath, &len);
+  if (blob == NULL || len < sizeof(want_key) - 1 ||
+      memcmp(blob, want_key, sizeof(want_key) - 1) != 0) {
+    fprintf(stderr, "warc-target-uri: %s does not open on \"%s\"\n", cpath,
+            want_key);
+    err = 1;
+  }
+  freet(blob);
+
+  StringCopy(opt->warc_file, saved_file);
+  opt->warc_cdx = saved_cdx;
+  opt->state.warc = saved_state;
+  return st_verdict("warc-target-uri", err);
+}
+
 #if HTS_USEOPENSSL
 /* Lowercase-hex SHA-256 of n bytes into out[65]; 1 on success. */
 static int wacz_test_sha256(const void *p, size_t n, char out[65]) {
@@ -2573,6 +2634,9 @@ const struct selftest_entry selftests_warc[] = {
     {"warc-teardown", "<dir>",
      "a closed or abandoned archive is not reopened by a late transaction",
      st_warc_teardown},
+    {"warc-target-uri", "<dir>",
+     "WARC-Target-URI and the CDXJ key carry the escaped request URL",
+     st_warc_target_uri},
 #if HTS_USEOPENSSL
     {"warc-wacz", "<dir>", "--wacz package: layout, STORE mode, sha256 digests",
      st_warc_wacz},
